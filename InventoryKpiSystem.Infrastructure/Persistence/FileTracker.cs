@@ -1,4 +1,5 @@
-﻿using System;
+﻿using InventoryKpiSystem.Core.Interfaces;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,6 +19,8 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
         private readonly HashSet<string> _processedChecksums;
         private readonly object _lockObject = new object();
         private readonly ILogger? _logger;
+        private string processedFilesDirectory;
+        private Logging.ILogger logger;
 
         public FileTracker(string registryDirectory = "data/processed-files", ILogger? logger = null)
         {
@@ -33,6 +36,12 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
 
             _processedChecksums = new HashSet<string>();
             LoadRegistry();
+        }
+
+        public FileTracker(string processedFilesDirectory, Logging.ILogger logger)
+        {
+            this.processedFilesDirectory = processedFilesDirectory;
+            this.logger = logger;
         }
 
         #region Public Methods

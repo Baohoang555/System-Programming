@@ -1,4 +1,5 @@
-﻿using System;
+﻿using InventoryKpiSystem.Core.Interfaces;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,7 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
         private readonly string _reportsDirectory;
         private readonly ILogger? _logger;
         private readonly JsonSerializerOptions _jsonOptions;
+        private Logging.ILogger logger;
 
         public KpiRegistry(string reportsDirectory = "data/reports", ILogger? logger = null)
         {
@@ -31,6 +33,12 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
                 WriteIndented = true,
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             };
+        }
+
+        public KpiRegistry(string reportsDirectory, Logging.ILogger logger)
+        {
+            _reportsDirectory = reportsDirectory;
+            this.logger = logger;
         }
 
         #region Public Methods

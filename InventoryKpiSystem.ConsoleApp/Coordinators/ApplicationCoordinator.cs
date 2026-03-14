@@ -546,7 +546,7 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
                 }
 
                 // Generate basic JSON report
-                var jsonPath = await _reportGenerator.GenerateBasicReportAsync(_currentReport);
+                var jsonPath = await _reportGenerator.GenerateBasicReportAsync(_currentReport).ConfigureAwait(false);
                 _formatter.DisplaySuccess($"JSON report: {Path.GetFileName(jsonPath)}");
 
                 // Generate detailed report

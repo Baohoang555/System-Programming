@@ -1,3 +1,4 @@
+using InventoryKpiSystem.Core.Models;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -74,10 +75,25 @@ namespace InventoryKpiSystem.ConsoleApp.Display
             foreach (var kvp in productKpis)
             {
                 await writer.WriteLineAsync(
-                    $"{kvp.Key},{kvp.Value.CurrentStock},{kvp.Value.StockValue:F2},{kvp.Value.AverageAge:F2}");
+                    $"{kvp.Key},{kvp.Value.CurrentStock},{kvp.Value.StockValue:F2},{kvp.Value.InventoryAgeDays:F2}");
             }
 
             return filePath;
+        }
+
+        internal async Task<string> GenerateBasicReportAsync(Infrastructure.Persistence.KpiReport currentReport)
+        {
+            throw new NotImplementedException();
+        }
+
+        internal async Task<string> GenerateDetailedReportAsync(Infrastructure.Persistence.KpiReport currentReport, Dictionary<string, Infrastructure.Persistence.ProductKpi> currentProductKpis)
+        {
+            throw new NotImplementedException();
+        }
+
+        internal async Task<string> GenerateCsvReportAsync(Dictionary<string, Infrastructure.Persistence.ProductKpi> currentProductKpis)
+        {
+            throw new NotImplementedException();
         }
     }
 }

@@ -4,6 +4,10 @@
     <ProjectReference Include="..\InventoryKpiSystem.Core\InventoryKpiSystem.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="10.0.5" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
