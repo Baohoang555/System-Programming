@@ -31,7 +31,7 @@ InventoryKPISystem/
 ### Bước 1 — Clone hoặc tải source code
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/Baohoang555/System-Programming.git
 cd InventoryKPISystem
 ```
 
