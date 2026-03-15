@@ -31,7 +31,7 @@ InventoryKPISystem/
 ### Bước 1 — Clone hoặc tải source code
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/Baohoang555/System-Programming.git
 cd InventoryKPISystem
 ```
 
@@ -66,14 +66,6 @@ Màn hình khởi động sẽ hiển thị:
 ╚═══════════════════════════════════════════════════════════╝
 ```
 
-Hệ thống tự động tạo các thư mục sau nếu chưa tồn tại:
-```
-data/invoices/
-data/purchase-orders/
-data/reports/
-data/processed-files/
-logs/
-```
 
 ### Bước 4 — Sử dụng menu
 
