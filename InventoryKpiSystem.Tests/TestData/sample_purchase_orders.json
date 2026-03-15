@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "orderId": "PO-001",
+      "productId": "P001",
+      "quantity": 100,
+      "unitCost": 50000,
+      "date": "2025-01-01T00:00:00"
+    },
+    {
+      "orderId": "PO-002",
+      "productId": "P001",
+      "quantity": 50,
+      "unitCost": 50000,
+      "date": "2025-01-15T00:00:00"
+    },
+    {
+      "orderId": "PO-003",
+      "productId": "P002",
+      "quantity": 200,
+      "unitCost": 30000,
+      "date": "2025-01-05T00:00:00"
+    }
+  ]
+}

@@ -1,9 +1,9 @@
-﻿// Tests/UnitTests/KpiLogicTests.cs
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;                    
 using InventoryKpiSystem.Core.Models;
 using InventoryKpiSystem.Core.Services;
-using System;
-using System.Collections.Generic;
-using Microsoft.VisualStudio.TestTools.UnitTesting; // Thêm dòng này
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace InventoryKpiSystem.Tests.UnitTests
 {
@@ -160,7 +160,7 @@ namespace InventoryKpiSystem.Tests.UnitTests
             var p001 = updater.GetAggregate("P001");
             Assert.AreEqual(2, p001!.SaleDates.Count);
         }
-
+        
         [TestMethod]
         public void ProcessOrders_ThenInvoices_ShouldMergeCorrectly()
         {

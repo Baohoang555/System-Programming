@@ -9,58 +9,41 @@ using System.Text.Json;
 
 namespace InventoryKpiSystem.Infrastructure.Persistence
 {
-    /// <summary>
-    /// Tracks processed files để tránh duplicate processing.
-    /// Uses SHA256 checksum để identify files based on content.
-    /// </summary>
     public class FileTracker
     {
         private readonly string _registryFilePath;
         private readonly HashSet<string> _processedChecksums;
         private readonly object _lockObject = new object();
         private readonly ILogger? _logger;
-        private string processedFilesDirectory;
-        private Logging.ILogger logger;
 
+        // Primary constructor
         public FileTracker(string registryDirectory = "data/processed-files", ILogger? logger = null)
         {
             _logger = logger;
             _registryFilePath = Path.Combine(registryDirectory, "processed-files-registry.json");
 
-            // Tạo directory nếu chưa có 
             var directory = Path.GetDirectoryName(_registryFilePath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-            {
                 Directory.CreateDirectory(directory);
-            }
 
             _processedChecksums = new HashSet<string>();
             LoadRegistry();
         }
 
-        public FileTracker(string processedFilesDirectory, Logging.ILogger logger)
+        // Secondary constructor — delegates to primary so _processedChecksums is always initialized
+        public FileTracker(string registryDirectory, Logging.ILogger infraLogger)
+            : this(registryDirectory)
         {
-            this.processedFilesDirectory = processedFilesDirectory;
-            this.logger = logger;
+            // infraLogger used externally; core ILogger stays null
         }
 
-        #region Public Methods
-
-        /// <summary>
-        /// Kiểm tra file đã được xử lý chưa
-        /// </summary>
         public bool IsFileProcessed(string filePath)
         {
             var checksum = CalculateChecksum(filePath);
             lock (_lockObject)
-            {
                 return _processedChecksums.Contains(checksum);
-            }
         }
 
-        /// <summary>
-        /// Đánh dấu file đã được xử lý
-        /// </summary>
         public void MarkAsProcessed(string filePath)
         {
             var checksum = CalculateChecksum(filePath);
@@ -68,42 +51,28 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             {
                 if (_processedChecksums.Add(checksum))
                 {
-                    _logger?.LogDebug($"Marked as processed: {Path.GetFileName(filePath)} ({checksum.Substring(0, 8)}...)");
+                    _logger?.LogDebug($"Marked: {Path.GetFileName(filePath)} ({checksum[..8]}...)");
                     SaveRegistry();
                 }
             }
         }
 
-        /// <summary>
-        /// Xóa file khỏi registry (để reprocess)
-        /// </summary>
         public void UnmarkFile(string filePath)
         {
             var checksum = CalculateChecksum(filePath);
             lock (_lockObject)
             {
                 if (_processedChecksums.Remove(checksum))
-                {
-                    _logger?.LogDebug($"Unmarked file: {Path.GetFileName(filePath)}");
                     SaveRegistry();
-                }
             }
         }
 
-        /// <summary>
-        /// Đếm số file đã xử lý
-        /// </summary>
         public int GetProcessedFileCount()
         {
             lock (_lockObject)
-            {
                 return _processedChecksums.Count;
-            }
         }
 
-        /// <summary>
-        /// Reset registry (NGUY HIỂM!)
-        /// </summary>
         public void ClearRegistry()
         {
             lock (_lockObject)
@@ -114,30 +83,16 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             }
         }
 
-        #endregion
-
-        #region Private Helpers
-
-        /// <summary>
-        /// Tính SHA256 checksum của file
-        /// </summary>
         private string CalculateChecksum(string filePath)
         {
             using var sha256 = SHA256.Create();
             using var stream = File.OpenRead(filePath);
-            var hashBytes = sha256.ComputeHash(stream);
-
+            var hash = sha256.ComputeHash(stream);
             var sb = new StringBuilder();
-            foreach (var b in hashBytes)
-            {
-                sb.Append(b.ToString("x2"));
-            }
+            foreach (var b in hash) sb.Append(b.ToString("x2"));
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Load registry từ JSON file
-        /// </summary>
         private void LoadRegistry()
         {
             try
@@ -146,15 +101,11 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
                 {
                     var json = File.ReadAllText(_registryFilePath);
                     var data = JsonSerializer.Deserialize<ProcessedFilesRegistry>(json);
-
                     if (data?.ProcessedChecksums != null)
-                    {
-                        foreach (var checksum in data.ProcessedChecksums)
-                        {
-                            _processedChecksums.Add(checksum);
-                        }
-                        _logger?.LogInfo($"Loaded {_processedChecksums.Count} processed file records");
-                    }
+                        foreach (var c in data.ProcessedChecksums)
+                            _processedChecksums.Add(c);
+
+                    _logger?.LogInfo($"Loaded {_processedChecksums.Count} processed file records");
                 }
             }
             catch (Exception ex)
@@ -163,9 +114,6 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             }
         }
 
-        /// <summary>
-        /// Save registry vào JSON file
-        /// </summary>
         private void SaveRegistry()
         {
             try
@@ -175,13 +123,8 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
                     ProcessedChecksums = _processedChecksums.ToList(),
                     LastUpdated = DateTime.Now
                 };
-
-                var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                });
-
-                File.WriteAllText(_registryFilePath, json);
+                File.WriteAllText(_registryFilePath,
+                    JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
             }
             catch (Exception ex)
             {
@@ -189,11 +132,6 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             }
         }
 
-        #endregion
-
-        /// <summary>
-        /// Model cho registry file
-        /// </summary>
         private class ProcessedFilesRegistry
         {
             public List<string> ProcessedChecksums { get; set; } = new();

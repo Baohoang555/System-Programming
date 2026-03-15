@@ -1,0 +1,25 @@
+{
+  "invoices": [
+    {
+      "invoiceId": "INV-001",
+      "productId": "P001",
+      "quantity": 80,
+      "unitPrice": 70000,
+      "date": "2025-02-01T00:00:00"
+    },
+    {
+      "invoiceId": "INV-002",
+      "productId": "P001",
+      "quantity": 20,
+      "unitPrice": 70000,
+      "date": "2025-02-03T00:00:00"
+    },
+    {
+      "invoiceId": "INV-003",
+      "productId": "P002",
+      "quantity": 200,
+      "unitPrice": 45000,
+      "date": "2025-02-05T00:00:00"
+    }
+  ]
+}

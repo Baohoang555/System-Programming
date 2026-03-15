@@ -15,9 +15,7 @@ namespace InventoryKpiSystem.ConsoleApp.Display
         {
             _outputDirectory = outputDirectory;
             if (!Directory.Exists(_outputDirectory))
-            {
                 Directory.CreateDirectory(_outputDirectory);
-            }
         }
 
         public async Task<string> GenerateBasicReportAsync(KpiReport report)
@@ -70,30 +68,15 @@ namespace InventoryKpiSystem.ConsoleApp.Display
             var filePath = Path.Combine(_outputDirectory, fileName);
 
             using var writer = new StreamWriter(filePath);
-            await writer.WriteLineAsync("ProductId,CurrentStock,StockValue,AverageAge");
+            await writer.WriteLineAsync("ProductId,CurrentStock,StockValue,AverageAgeDays");
 
             foreach (var kvp in productKpis)
             {
                 await writer.WriteLineAsync(
-                    $"{kvp.Key},{kvp.Value.CurrentStock},{kvp.Value.StockValue:F2},{kvp.Value.InventoryAgeDays:F2}");
+                    $"{kvp.Key},{kvp.Value.CurrentStock},{kvp.Value.StockValue:F2},{kvp.Value.InventoryAgeDays}");
             }
 
             return filePath;
-        }
-
-        internal async Task<string> GenerateBasicReportAsync(Infrastructure.Persistence.KpiReport currentReport)
-        {
-            throw new NotImplementedException();
-        }
-
-        internal async Task<string> GenerateDetailedReportAsync(Infrastructure.Persistence.KpiReport currentReport, Dictionary<string, Infrastructure.Persistence.ProductKpi> currentProductKpis)
-        {
-            throw new NotImplementedException();
-        }
-
-        internal async Task<string> GenerateCsvReportAsync(Dictionary<string, Infrastructure.Persistence.ProductKpi> currentProductKpis)
-        {
-            throw new NotImplementedException();
         }
     }
 }

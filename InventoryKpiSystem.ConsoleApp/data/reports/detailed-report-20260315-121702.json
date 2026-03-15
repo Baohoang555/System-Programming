@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-03-15T12:17:02.5003508+07:00",
+  "systemKPIs": {
+    "reportId": "692a11f5-e3de-4a78-82ab-6bbd89f62043",
+    "exportedDate": "2026-03-15T12:16:18.2883031+07:00",
+    "details": [],
+    "totalStockValue": 0,
+    "totalProductsProcessed": 0,
+    "systemWide": {
+      "totalSkus": 0,
+      "totalStockValue": 0,
+      "outOfStockCount": 0,
+      "avgDailySales": 0,
+      "avgInventoryAgeDays": 0
+    }
+  },
+  "productKPIs": {},
+  "metadata": {
+    "totalProducts": 0,
+    "reportVersion": "1.0"
+  }
+}

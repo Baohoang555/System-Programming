@@ -1,6 +1,7 @@
 ﻿using InventoryKpiSystem.Core.Models;
 using InventoryKpiSystem.Core.DataAccess;
 using Xunit;
+using Assert = Xunit.Assert; // resolve ambiguity with MSTest.Assert
 
 namespace InventoryKpiSystem.Tests.UnitTests
 {

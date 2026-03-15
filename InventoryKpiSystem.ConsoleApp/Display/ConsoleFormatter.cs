@@ -1,7 +1,5 @@
 ﻿using InventoryKpiSystem.Core.Models;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace InventoryKpiSystem.ConsoleApp.Display
 {
@@ -12,7 +10,6 @@ namespace InventoryKpiSystem.ConsoleApp.Display
             Console.Clear();
             PrintHeader("INVENTORY KPI DASHBOARD");
 
-            // Use ExportedDate instead of non-existent GeneratedAt property
             Console.WriteLine($"Generated: {report.ExportedDate:yyyy-MM-dd HH:mm:ss}\n");
 
             Console.WriteLine("┌─────────────────────────────────────────┬──────────────┐");
@@ -20,9 +17,9 @@ namespace InventoryKpiSystem.ConsoleApp.Display
             Console.WriteLine("├─────────────────────────────────────────┼──────────────┤");
             Console.WriteLine($"│ Total SKUs                              │ {report.TotalProductsProcessed,12} │");
             Console.WriteLine($"│ Cost of Inventory                       │ ${report.TotalStockValue,11:N2} │");
-            Console.WriteLine($"│ Out-of-Stock Items                      │ {report.SystemWide?.OutOfStockItems ?? 0,12} │");
-            Console.WriteLine($"│ Average Daily Sales                     │ {report.SystemWide?.AverageDailySales ?? 0,12:F2} │");
-            Console.WriteLine($"│ Average Inventory Age (days)            │ {report.SystemWide?.AverageInventoryAge ?? 0,12:F1} │");
+            Console.WriteLine($"│ Out-of-Stock Items                      │ {report.SystemWide?.OutOfStockCount ?? 0,12} │");
+            Console.WriteLine($"│ Average Daily Sales                     │ {report.SystemWide?.AvgDailySales ?? 0,12:F2} │");
+            Console.WriteLine($"│ Average Inventory Age (days)            │ {report.SystemWide?.AvgInventoryAgeDays ?? 0.0,12:F1} │");
             Console.WriteLine("└─────────────────────────────────────────┴──────────────┘\n");
         }
 
@@ -75,11 +72,6 @@ namespace InventoryKpiSystem.ConsoleApp.Display
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine($"✗ {message}");
             Console.ResetColor();
-        }
-
-        internal void DisplayKpiReport(Infrastructure.Persistence.KpiReport currentReport)
-        {
-            throw new NotImplementedException();
         }
     }
 }

@@ -1,17 +1,17 @@
-﻿using InventoryKPI.Models;
-using InventoryKPI.Data;
+﻿using InventoryKpiSystem.Core.Models;
+using InventoryKpiSystem.Core.DataAccess;
 using Xunit;
+using Assert = Xunit.Assert;
 
-namespace InventoryKPI.Tests
+namespace InventoryKpiSystem.Tests.UnitTests
 {
-    public class DataValidatorTests
+    public class ModelTests
     {
-        // --- KIỂM THỬ HÓA ĐƠN BÁN HÀNG (INVOICE) ---
+        // --- INVOICE VALIDATION ---
 
         [Fact]
         public void IsValidInvoice_WithValidData_ShouldReturnTrue()
         {
-            // Kiểm tra trường hợp dữ liệu đầy đủ và chính xác
             var invoice = new Invoice
             {
                 InvoiceId = "INV-001",
@@ -23,13 +23,13 @@ namespace InventoryKPI.Tests
         }
 
         [Theory]
-        [InlineData("", "P1", 10, 100)]    // Lỗi: Thiếu ID hóa đơn
-        [InlineData("INV1", "", 10, 100)]  // Lỗi: Thiếu ID sản phẩm
-        [InlineData("INV1", "P1", 0, 100)]  // Lỗi: Số lượng không thể bằng 0
-        [InlineData("INV1", "P1", 10, -50)] // Lỗi: Đơn giá không được âm
-        public void IsValidInvoice_WithInvalidData_ShouldReturnFalse(string id, string pId, int qty, decimal price)
+        [InlineData("", "P1", 10, 100)]    // Missing InvoiceId
+        [InlineData("INV1", "", 10, 100)]  // Missing ProductId
+        [InlineData("INV1", "P1", 0, 100)] // Zero quantity
+        [InlineData("INV1", "P1", 10, -50)]// Negative price
+        public void IsValidInvoice_WithInvalidData_ShouldReturnFalse(
+            string id, string pId, int qty, decimal price)
         {
-            // Kiểm tra các trường hợp biên và dữ liệu sai logic
             var invoice = new Invoice
             {
                 InvoiceId = id,
@@ -40,12 +40,11 @@ namespace InventoryKPI.Tests
             Assert.False(DataValidator.IsValidInvoice(invoice));
         }
 
-        // --- KIỂM THỬ ĐƠN NHẬP HÀNG (PURCHASE ORDER) ---
+        // --- PURCHASE ORDER VALIDATION ---
 
         [Fact]
         public void IsValidPurchaseOrder_WithValidData_ShouldReturnTrue()
         {
-            // Kiểm tra đơn nhập hàng hợp lệ
             var po = new PurchaseOrder
             {
                 OrderId = "PO-999",
@@ -59,7 +58,6 @@ namespace InventoryKPI.Tests
         [Fact]
         public void IsValidPurchaseOrder_WithNegativeCost_ShouldReturnFalse()
         {
-            // Kiểm tra lỗi logic khi giá vốn nhập vào bị âm
             var po = new PurchaseOrder
             {
                 OrderId = "PO-999",

@@ -1,4 +1,5 @@
 ﻿using InventoryKpiSystem.Core.Interfaces;
+using InventoryKpiSystem.Core.Models;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -9,14 +10,14 @@ using System.Threading.Tasks;
 namespace InventoryKpiSystem.Infrastructure.Persistence
 {
     /// <summary>
-    /// Manages KPI report storage và history.
+    /// Manages KPI report storage and history.
+    /// Uses Core.Models.KpiReport — no duplicate model definitions.
     /// </summary>
     public class KpiRegistry
     {
         private readonly string _reportsDirectory;
         private readonly ILogger? _logger;
         private readonly JsonSerializerOptions _jsonOptions;
-        private Logging.ILogger logger;
 
         public KpiRegistry(string reportsDirectory = "data/reports", ILogger? logger = null)
         {
@@ -24,9 +25,7 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             _logger = logger;
 
             if (!Directory.Exists(_reportsDirectory))
-            {
                 Directory.CreateDirectory(_reportsDirectory);
-            }
 
             _jsonOptions = new JsonSerializerOptions
             {
@@ -35,27 +34,22 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             };
         }
 
+        // Secondary constructor accepting Infrastructure.Logging.ILogger
         public KpiRegistry(string reportsDirectory, Logging.ILogger logger)
+            : this(reportsDirectory)
         {
-            _reportsDirectory = reportsDirectory;
-            this.logger = logger;
+            // logging via infrastructure logger; wrap if needed
         }
 
-        #region Public Methods
-
-        /// <summary>
-        /// Save KPI report với timestamp
-        /// </summary>
         public async Task SaveReportAsync(KpiReport report)
         {
             try
             {
                 var now = DateTime.Now;
-                var fileName = $"kpi-report-{now:yyyyMMdd-HHmmss}.json";
+                var fileName = $"kpi-report-{now:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.json";
                 var filePath = Path.Combine(_reportsDirectory, fileName);
 
-                // Cập nhật thời gian tạo vào report trước khi lưu
-                report.GeneratedAt = now;
+                report.ExportedDate = now;
 
                 var json = JsonSerializer.Serialize(report, _jsonOptions);
                 await File.WriteAllTextAsync(filePath, json);
@@ -69,10 +63,9 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             }
         }
 
-        /// <summary>
-        /// Save detailed report (system + product KPIs)
-        /// </summary>
-        public async Task SaveDetailedReportAsync(KpiReport systemReport, Dictionary<string, ProductKpi> productKpis)
+        public async Task SaveDetailedReportAsync(
+            KpiReport systemReport,
+            Dictionary<string, ProductKpi> productKpis)
         {
             try
             {
@@ -104,9 +97,6 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             }
         }
 
-        /// <summary>
-        /// Load báo cáo mới nhất
-        /// </summary>
         public async Task<KpiReport?> LoadLatestReportAsync()
         {
             try
@@ -114,14 +104,9 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
                 var files = Directory.GetFiles(_reportsDirectory, "kpi-report-*.json");
                 if (files.Length == 0) return null;
 
-                // Sắp xếp theo tên file (vì tên file có chứa yyyyMMdd-HHmmss nên sort text là đủ)
                 var latestFile = files.OrderByDescending(f => f).First();
-
                 var json = await File.ReadAllTextAsync(latestFile);
-                var report = JsonSerializer.Deserialize<KpiReport>(json, _jsonOptions);
-
-                _logger?.LogDebug($"Loaded: {Path.GetFileName(latestFile)}");
-                return report;
+                return JsonSerializer.Deserialize<KpiReport>(json, _jsonOptions);
             }
             catch (Exception ex)
             {
@@ -130,9 +115,6 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
             }
         }
 
-        /// <summary>
-        /// Clean old reports
-        /// </summary>
         public void CleanOldReports(int daysToKeep = 30)
         {
             try
@@ -152,38 +134,12 @@ namespace InventoryKpiSystem.Infrastructure.Persistence
                 }
 
                 if (deletedCount > 0)
-                {
                     _logger?.LogInfo($"Cleaned {deletedCount} old reports");
-                }
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Failed to clean old reports", ex);
             }
         }
-
-        #endregion
     }
-
-    #region Models
-    // Các model này thường nên nằm ở folder Domain/Models hoặc Core/Entities
-
-    public class KpiReport
-    {
-        public int TotalSKUs { get; set; }
-        public decimal CostOfInventory { get; set; }
-        public int OutOfStockItems { get; set; }
-        public double AverageDailySales { get; set; }
-        public double AverageInventoryAge { get; set; }
-        public DateTime GeneratedAt { get; set; }
-    }
-
-    public class ProductKpi
-    {
-        public string ProductId { get; set; } = string.Empty;
-        public int CurrentStock { get; set; }
-        public decimal StockValue { get; set; }
-        public double AverageAge { get; set; }
-    }
-    #endregion
 }
