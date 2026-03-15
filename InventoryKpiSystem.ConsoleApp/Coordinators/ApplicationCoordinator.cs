@@ -7,7 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using InventoryKpiSystem.ConsoleApp.Configuration;
 using InventoryKpiSystem.ConsoleApp.Display;
+using InventoryKpiSystem.Core.DataAccess;
 using InventoryKpiSystem.Core.Models;
+using InventoryKpiSystem.Core.Services;
 using InventoryKpiSystem.Infrastructure.Logging;
 using InventoryKpiSystem.Infrastructure.Persistence;
 
@@ -15,7 +17,6 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
 {
     public class ApplicationCoordinator
     {
-        // ── Infrastructure ───────────────────────────────────────────────
         private readonly AppConfig _config;
         private readonly Logger _logger;
         private readonly ProcessingLogger _processingLogger;
@@ -24,7 +25,11 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
         private readonly ConsoleFormatter _formatter;
         private readonly JsonReportGenerator _reportGenerator;
 
-        // ── State ────────────────────────────────────────────────────────
+        // Core services — fully wired
+        private readonly XeroDataImporter _xeroImporter;
+        private readonly IncrementalKpiUpdater _kpiUpdater;
+        private readonly KpiCalculator _kpiCalculator;
+
         private readonly Stopwatch _uptime = new();
         private readonly CancellationTokenSource _cts = new();
         private long _filesProcessed;
@@ -32,21 +37,15 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
         private readonly List<ProcessingError> _recentErrors = new();
         private readonly object _stateLock = new();
 
-        // ── KPI state (Core.Models — single source of truth) ─────────────
         private KpiReport? _currentReport;
         private Dictionary<string, ProductKpi> _currentProductKpis = new();
-
-        // ════════════════════════════════════════════════════════════════
-        // CONSTRUCTOR
-        // ════════════════════════════════════════════════════════════════
 
         public ApplicationCoordinator(AppConfig config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
 
             var logLevel = config.EnableDetailedLogging ? LogLevel.Debug : LogLevel.Info;
-            _logger = new Logger(
-                config.LogDirectory, "app.log",
+            _logger = new Logger(config.LogDirectory, "app.log",
                 config.EnableConsoleOutput, config.EnableFileOutput, logLevel);
 
             _processingLogger = new ProcessingLogger(_logger);
@@ -54,11 +53,11 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
             _kpiRegistry = new KpiRegistry(config.ReportsDirectory, _logger);
             _formatter = new ConsoleFormatter();
             _reportGenerator = new JsonReportGenerator(config.ReportsDirectory);
-        }
 
-        // ════════════════════════════════════════════════════════════════
-        // LIFECYCLE
-        // ════════════════════════════════════════════════════════════════
+            _xeroImporter = new XeroDataImporter();
+            _kpiUpdater = new IncrementalKpiUpdater();
+            _kpiCalculator = new KpiCalculator();
+        }
 
         public async Task StartAsync()
         {
@@ -66,17 +65,19 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
             {
                 _formatter.DisplayWelcomeBanner();
                 _processingLogger.LogSystemStartup();
-
                 _config.ValidateAndCreateDirectories();
+
+                _logger.LogInfo("Loading data from Xero files...");
                 await LoadHistoricalDataAsync();
+
+                _logger.LogInfo("Calculating KPIs...");
                 await CalculateInitialKpisAsync();
-                StartFileMonitoring();
+
                 StartBackgroundTasks();
-
                 _uptime.Start();
-                _formatter.DisplaySuccess("System started successfully!");
-                _logger.LogInfo($"Previously processed files: {_fileTracker.GetProcessedFileCount()}");
 
+                _formatter.DisplaySuccess("System started successfully!");
+                _formatter.DisplaySuccess($"Loaded {_recordsProcessed:N0} records from {_filesProcessed} files.");
                 await RunMainLoopAsync();
             }
             catch (Exception ex)
@@ -92,15 +93,8 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
             try
             {
                 _cts.Cancel();
-
                 if (_currentReport != null)
                     await _kpiRegistry.SaveReportAsync(_currentReport);
-
-                _processingLogger.LogStatistics(
-                    (int)_filesProcessed,
-                    (int)_filesProcessed - _recentErrors.Count,
-                    _recentErrors.Count, 0, _uptime.Elapsed);
-
                 _logger.LogInfo("Shutdown completed");
             }
             catch (Exception ex)
@@ -109,51 +103,81 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
             }
         }
 
-        // ════════════════════════════════════════════════════════════════
-        // INITIALIZATION
-        // ════════════════════════════════════════════════════════════════
+        // ── Data Loading ─────────────────────────────────────────────────
 
         private async Task LoadHistoricalDataAsync()
         {
-            // TODO: wire up JsonDataReader from Core once data files are in place
-            await Task.Delay(200);
-            _logger.LogInfo("Historical data loaded (placeholder)");
+            try
+            {
+                // Đọc invoice files (cả ACCREC lẫn ACCPAY) từ InvoiceDirectory
+                var (invoices, purchaseOrders) =
+                    await _xeroImporter.ReadAllInvoiceFilesAsync(_config.InvoiceDirectory);
+
+                // Nếu có thư mục purchase-orders riêng, đọc thêm
+                if (_config.PurchaseOrderDirectory != _config.InvoiceDirectory &&
+                    Directory.Exists(_config.PurchaseOrderDirectory))
+                {
+                    var (inv2, po2) = await _xeroImporter.ReadAllInvoiceFilesAsync(_config.PurchaseOrderDirectory);
+                    invoices.AddRange(inv2);
+                    purchaseOrders.AddRange(po2);
+                }
+
+                _logger.LogInfo($"Sales lines (ACCREC):    {invoices.Count}");
+                _logger.LogInfo($"Purchase lines (ACCPAY): {purchaseOrders.Count}");
+
+                _kpiUpdater.ProcessNewPurchaseOrders(purchaseOrders);
+                _kpiUpdater.ProcessNewInvoices(invoices);
+
+                lock (_stateLock)
+                    _recordsProcessed = invoices.Count + purchaseOrders.Count;
+
+                // Đếm files
+                var allFiles = new List<string>();
+                allFiles.AddRange(Directory.GetFiles(_config.InvoiceDirectory, "*.json"));
+                allFiles.AddRange(Directory.GetFiles(_config.InvoiceDirectory, "*.txt"));
+                foreach (var f in allFiles)
+                {
+                    if (_fileTracker.IsFileProcessed(f)) continue;
+                    _fileTracker.MarkAsProcessed(f);
+                    lock (_stateLock) { _filesProcessed++; }
+                }
+
+                _logger.LogInfo("Data loaded successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Failed to load historical data", ex);
+                throw;
+            }
         }
 
         private async Task CalculateInitialKpisAsync()
         {
-            // Placeholder — replaced by real KpiCalculator output once data flows in
-            _currentReport = new KpiReport
+            var aggregates = _kpiUpdater.GetAllAggregates();
+
+            if (aggregates.Count == 0)
             {
-                ReportId = Guid.NewGuid().ToString(),
-                ExportedDate = DateTime.Now,
-                SystemWide = new SystemWideKpi()
-            };
+                _logger.LogWarning("No data found — check invoice directory path in appsettings.json");
+                _currentReport = new KpiReport
+                {
+                    ReportId = Guid.NewGuid().ToString(),
+                    ExportedDate = DateTime.Now,
+                    SystemWide = new SystemWideKpi()
+                };
+            }
+            else
+            {
+                _currentReport = _kpiCalculator.GenerateReport(aggregates);
+                _currentProductKpis = _currentReport.Details
+                    .ToDictionary(k => k.ProductId, k => k);
+            }
 
             _formatter.DisplayKpiReport(_currentReport);
             await Task.CompletedTask;
-            _logger.LogInfo("Initial KPIs calculated");
+            _logger.LogInfo($"KPIs calculated for {aggregates.Count} unique products");
         }
 
-        private void StartFileMonitoring()
-        {
-            // TODO: wire up InventoryWatcher
-            _logger.LogInfo($"Monitoring: {_config.InvoiceDirectory}, {_config.PurchaseOrderDirectory}");
-        }
-
-        private void StartBackgroundTasks()
-        {
-            if (_config.AutoGenerateReports)
-                Task.Run(AutoReportGenerationLoopAsync, _cts.Token);
-
-            Task.Run(PeriodicCleanupLoopAsync, _cts.Token);
-            Task.Run(MemoryMonitorLoopAsync, _cts.Token);
-            Task.Run(StatisticsLoggingLoopAsync, _cts.Token);
-        }
-
-        // ════════════════════════════════════════════════════════════════
-        // MAIN LOOP
-        // ════════════════════════════════════════════════════════════════
+        // ── Main Loop ─────────────────────────────────────────────────────
 
         private async Task RunMainLoopAsync()
         {
@@ -172,71 +196,58 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
                         case "3": DisplaySystemStatus(); break;
                         case "4": await GenerateReportsAsync(); break;
                         case "5": DisplayConfiguration(); break;
-                        case "Q":
-                            _logger.LogInfo("User requested shutdown");
-                            running = false;
-                            break;
+                        case "Q": running = false; break;
                         default:
                             _formatter.DisplayError("Invalid option.");
                             continue;
                     }
 
-                    if (running)
-                    {
-                        Console.WriteLine("\nPress any key to continue...");
-                        Console.ReadKey(true);
-                    }
+                    if (running) { Console.WriteLine("\nPress any key..."); Console.ReadKey(true); }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError("Error in main loop", ex);
                     _formatter.DisplayError($"Error: {ex.Message}");
-                    Console.WriteLine("\nPress any key to continue...");
-                    Console.ReadKey(true);
+                    Console.WriteLine("\nPress any key..."); Console.ReadKey(true);
                 }
             }
         }
 
-        // ════════════════════════════════════════════════════════════════
-        // MENU ACTIONS
-        // ════════════════════════════════════════════════════════════════
+        // ── Menu Actions ──────────────────────────────────────────────────
 
         private void DisplayCurrentKpis()
         {
-            if (_currentReport != null)
-                _formatter.DisplayKpiReport(_currentReport);
-            else
-                _formatter.DisplayError("No KPI data available yet.");
+            if (_currentReport != null) _formatter.DisplayKpiReport(_currentReport);
+            else _formatter.DisplayError("No KPI data available.");
         }
 
         private void DisplayProductKpis()
         {
             if (_currentProductKpis.Count == 0)
             {
-                _formatter.DisplayError("No product data available yet.");
+                _formatter.DisplayError("No product data. Add invoice files to: " + _config.InvoiceDirectory);
                 return;
             }
 
             Console.Clear();
-            Console.WriteLine("═══════════════════════════════════════════════════════════");
-            Console.WriteLine("   PRODUCT-LEVEL KPIs");
-            Console.WriteLine("═══════════════════════════════════════════════════════════\n");
-            Console.WriteLine("┌──────────────┬────────────┬──────────────┬─────────────┐");
-            Console.WriteLine("│ Product ID   │ Stock      │ Stock Value  │ Age (days)  │");
-            Console.WriteLine("├──────────────┼────────────┼──────────────┼─────────────┤");
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+            Console.WriteLine("   PRODUCT-LEVEL KPIs  (sorted by Stock Value)");
+            Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+            Console.WriteLine($"\n{"Product",-42} {"Stock",8} {"Value",12} {"Age(d)",8} {"OOS",5}");
+            Console.WriteLine(new string('─', 80));
 
             int count = 0;
-            foreach (var kvp in _currentProductKpis)
+            foreach (var kvp in _currentProductKpis.OrderByDescending(x => x.Value.StockValue))
             {
-                if (count++ >= 20) break;
-                var id = kvp.Key.Length > 12 ? kvp.Key[..12] : kvp.Key;
+                if (count++ >= 30) break;
                 var k = kvp.Value;
-                Console.WriteLine($"│ {id,-12} │ {k.CurrentStock,10} │ ${k.StockValue,11:N2} │ {k.InventoryAgeDays,11} │");
+                var id = k.ProductId.Length > 40 ? k.ProductId[..40] + ".." : k.ProductId;
+                Console.WriteLine($"{id,-42} {k.CurrentStock,8} {k.StockValue,12:N0} {k.InventoryAgeDays,8} {(k.IsOutOfStock ? "OOS" : "-"),5}");
             }
 
-            Console.WriteLine("└──────────────┴────────────┴──────────────┴─────────────┘");
-            if (_currentProductKpis.Count > 20)
-                Console.WriteLine($"\n(Showing top 20 of {_currentProductKpis.Count})");
+            Console.WriteLine(new string('─', 80));
+            Console.WriteLine($"Total: {_currentProductKpis.Count} products | " +
+                              $"Out of Stock: {_currentProductKpis.Values.Count(v => v.IsOutOfStock)}");
         }
 
         private void DisplaySystemStatus()
@@ -246,47 +257,30 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
             Console.WriteLine("   SYSTEM STATUS");
             Console.WriteLine("═══════════════════════════════════════════════════════════\n");
             Console.WriteLine($"Uptime:              {_uptime.Elapsed:hh\\:mm\\:ss}");
-            Console.WriteLine($"Files Processed:     {_filesProcessed}");
+            Console.WriteLine($"Files Loaded:        {_filesProcessed}");
             Console.WriteLine($"Records Processed:   {_recordsProcessed:N0}");
+            Console.WriteLine($"Unique Products:     {_currentProductKpis.Count}");
             Console.WriteLine($"Memory:              {GC.GetTotalMemory(false) / 1024.0 / 1024.0:F2} MB");
-            Console.WriteLine($"Tracked Files:       {_fileTracker.GetProcessedFileCount()}");
 
-            if (_recentErrors.Count > 0)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"\n⚠ Recent Errors: {_recentErrors.Count}");
-                Console.ResetColor();
-                foreach (var e in _recentErrors.Take(5))
-                    Console.WriteLine($"  [{e.Timestamp:HH:mm:ss}] {e.FileName}: {e.ErrorMessage}");
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("\n✓ No recent errors");
-                Console.ResetColor();
-            }
+            Console.ForegroundColor = _recentErrors.Count > 0 ? ConsoleColor.Red : ConsoleColor.Green;
+            Console.WriteLine(_recentErrors.Count > 0
+                ? $"\n⚠ Recent Errors: {_recentErrors.Count}"
+                : "\n✓ No recent errors");
+            Console.ResetColor();
         }
 
         private async Task GenerateReportsAsync()
         {
-            if (_currentReport == null)
-            {
-                _formatter.DisplayError("No data available to generate reports.");
-                return;
-            }
-
+            if (_currentReport == null) { _formatter.DisplayError("No data."); return; }
             Console.WriteLine("\nGenerating reports...");
-
-            var jsonPath = await _reportGenerator.GenerateBasicReportAsync(_currentReport);
-            _formatter.DisplaySuccess($"JSON: {Path.GetFileName(jsonPath)}");
-
-            var detailPath = await _reportGenerator.GenerateDetailedReportAsync(_currentReport, _currentProductKpis);
-            _formatter.DisplaySuccess($"Detailed: {Path.GetFileName(detailPath)}");
-
+            var j = await _reportGenerator.GenerateBasicReportAsync(_currentReport);
+            _formatter.DisplaySuccess($"JSON:     {Path.GetFileName(j)}");
+            var d = await _reportGenerator.GenerateDetailedReportAsync(_currentReport, _currentProductKpis);
+            _formatter.DisplaySuccess($"Detailed: {Path.GetFileName(d)}");
             if (_currentProductKpis.Count > 0)
             {
-                var csvPath = await _reportGenerator.GenerateCsvReportAsync(_currentProductKpis);
-                _formatter.DisplaySuccess($"CSV: {Path.GetFileName(csvPath)}");
+                var c = await _reportGenerator.GenerateCsvReportAsync(_currentProductKpis);
+                _formatter.DisplaySuccess($"CSV:      {Path.GetFileName(c)}");
             }
         }
 
@@ -296,48 +290,32 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
             Console.WriteLine("═══════════════════════════════════════════════════════════");
             Console.WriteLine("   CONFIGURATION");
             Console.WriteLine("═══════════════════════════════════════════════════════════\n");
-            Console.WriteLine($"Invoice Dir:       {_config.InvoiceDirectory}");
-            Console.WriteLine($"Purchase Order Dir:{_config.PurchaseOrderDirectory}");
-            Console.WriteLine($"Reports Dir:       {_config.ReportsDirectory}");
-            Console.WriteLine($"Logs Dir:          {_config.LogDirectory}");
-            Console.WriteLine($"Max Concurrent:    {_config.MaxConcurrentFiles}");
-            Console.WriteLine($"Retry Attempts:    {_config.RetryAttempts}");
+            Console.WriteLine($"Invoice Dir:       {Path.GetFullPath(_config.InvoiceDirectory)}");
+            Console.WriteLine($"Reports Dir:       {Path.GetFullPath(_config.ReportsDirectory)}");
+            Console.WriteLine($"Logs Dir:          {Path.GetFullPath(_config.LogDirectory)}");
             Console.WriteLine($"Auto Reports:      {_config.AutoGenerateReports}");
-            Console.WriteLine($"Report Interval:   {_config.ReportGenerationIntervalMinutes} min");
         }
 
-        // ════════════════════════════════════════════════════════════════
-        // BACKGROUND TASKS
-        // ════════════════════════════════════════════════════════════════
+        // ── Background Tasks ──────────────────────────────────────────────
 
-        private async Task AutoReportGenerationLoopAsync()
+        private void StartBackgroundTasks()
+        {
+            if (_config.AutoGenerateReports)
+                Task.Run(AutoReportLoopAsync, _cts.Token);
+            Task.Run(MemoryMonitorLoopAsync, _cts.Token);
+        }
+
+        private async Task AutoReportLoopAsync()
         {
             while (!_cts.Token.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(
-                        TimeSpan.FromMinutes(_config.ReportGenerationIntervalMinutes), _cts.Token);
-                    if (_currentReport != null)
-                        await _kpiRegistry.SaveReportAsync(_currentReport);
+                    await Task.Delay(TimeSpan.FromMinutes(_config.ReportGenerationIntervalMinutes), _cts.Token);
+                    if (_currentReport != null) await _kpiRegistry.SaveReportAsync(_currentReport);
                 }
                 catch (TaskCanceledException) { break; }
                 catch (Exception ex) { _logger.LogError("Auto-report error", ex); }
-            }
-        }
-
-        private async Task PeriodicCleanupLoopAsync()
-        {
-            while (!_cts.Token.IsCancellationRequested)
-            {
-                try
-                {
-                    var delay = DateTime.Now.Date.AddDays(1).AddHours(2) - DateTime.Now;
-                    await Task.Delay(delay, _cts.Token);
-                    _kpiRegistry.CleanOldReports(_config.ReportCleanupDays);
-                }
-                catch (TaskCanceledException) { break; }
-                catch (Exception ex) { _logger.LogError("Cleanup error", ex); }
             }
         }
 
@@ -349,76 +327,15 @@ namespace InventoryKpiSystem.ConsoleApp.Coordinators
                 {
                     await Task.Delay(TimeSpan.FromMinutes(5), _cts.Token);
                     _processingLogger.LogMemoryUsage();
-                    var mb = GC.GetTotalMemory(false) / 1024.0 / 1024.0;
-                    if (mb > 500)
-                    {
-                        GC.Collect();
-                        GC.WaitForPendingFinalizers();
-                        GC.Collect();
-                        _logger.LogWarning($"Forced GC: was {mb:F1} MB");
-                    }
                 }
                 catch (TaskCanceledException) { break; }
-                catch (Exception ex) { _logger.LogError("Memory monitor error", ex); }
-            }
-        }
-
-        private async Task StatisticsLoggingLoopAsync()
-        {
-            while (!_cts.Token.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromMinutes(15), _cts.Token);
-                    _logger.LogInfo($"Stats: {_filesProcessed} files, {_recordsProcessed:N0} records, uptime {_uptime.Elapsed:hh\\:mm\\:ss}");
-                }
-                catch (TaskCanceledException) { break; }
-                catch (Exception ex) { _logger.LogError("Stats logging error", ex); }
-            }
-        }
-
-        // ════════════════════════════════════════════════════════════════
-        // FILE PROCESSING
-        // ════════════════════════════════════════════════════════════════
-
-        private async Task HandleNewFileAsync(string filePath, string fileType)
-        {
-            try
-            {
-                _processingLogger.LogFileDetected(filePath, fileType);
-
-                if (_fileTracker.IsFileProcessed(filePath))
-                {
-                    _processingLogger.LogFileSkipped(filePath, "Already processed");
-                    return;
-                }
-
-                await Task.Delay(100); // placeholder for real processing
-                _fileTracker.MarkAsProcessed(filePath);
-
-                lock (_stateLock) { _filesProcessed++; }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error handling file: {filePath}", ex);
-                lock (_stateLock)
-                {
-                    _recentErrors.Add(new ProcessingError
-                    {
-                        Timestamp = DateTime.Now,
-                        FileName = Path.GetFileName(filePath),
-                        ErrorMessage = ex.Message
-                    });
-                    if (_recentErrors.Count > 50)
-                        _recentErrors.RemoveAt(0);
-                }
+                catch (Exception ex) { _logger.LogError("Memory error", ex); }
             }
         }
 
         public void UpdateKpisIncremental(object newData, int recordCount)
         {
             lock (_stateLock) { _recordsProcessed += recordCount; }
-            _logger.LogDebug($"KPIs updated with {recordCount} records");
         }
     }
 
